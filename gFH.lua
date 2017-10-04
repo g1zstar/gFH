@@ -16,14 +16,48 @@ local function print(...)
    ChatFrame1:AddMessage(message)
 end
 
+local function LoadFile(FilePath, LoadMsg)
+   if not FileExists(FilePath) then print("File, "..FilePath..", does not exist.") return end
+   local lua = ReadFile(FilePath)
+   -- local func,err = loadstring(lua,Root .. "\\" .. FilePath)
+   local func,err = loadstring(lua)
+   if err then
+      error(err,0)
+   else
+      pcall(func)
+      if LoadMsg then
+         print(LoadMsg)
+      end
+   end
+end
+
 gFH.CO = coroutine.create(function()
    while (not FireHack) do
       coroutine.yield(false)
    end
 
-   gFH.Version = 1.0
+   gFH.Version = 1.1
    local waitForUpdateCheck = false
    local updateCheckSucceeded = false
+
+   local settingsTable
+   local playerFullName = UnitFullName("player")..string.gsub(GetRealmName(), " ", "")
+   LoadFile(GetHackDirectory().."\\Scripts\\gFH\\JSONParser.lua")
+   local settingsFile = GetHackDirectory().."\\Scripts\\gFH\\settings.json"
+   if not FileExists(settingsFile) or not json.decode(ReadFile(settingsFile)) then
+      WriteFile(settingsFile, "")
+      settingsTable = {}
+      settingsTable[playerFullName] = {}
+   else
+      settingsTable = json.decode(ReadFile(settingsFile))
+      if not settingsTable[playerFullName] then settingsTable[playerFullName] = {} end
+   end
+
+   local writeSettingsQueued = false
+   local function writeSettingsToDisk()
+      WriteFile(settingsFile, json.encode(settingsTable, {indent=true}))
+      writeSettingsQueued = false
+   end
 
    local function checkUpdate(source)
       if updateCheckSucceeded then return end
@@ -44,7 +78,7 @@ gFH.CO = coroutine.create(function()
       if not waitForUpdateCheck then SendHTTPRequest("https://raw.githubusercontent.com/g1zstar/gFH/master/Version.txt", nil, checkUpdate, checkFailed) end
       coroutine.yield(false)
    end
-
+   
    local gFHCOFrame = CreateFrame("Frame")
    local gFHCO
    local gFHCOQueue = {}
@@ -73,18 +107,14 @@ gFH.CO = coroutine.create(function()
 
    guiFrame:SetFrameStrata("HIGH")
    guiFrame:SetMovable(true)
-   -- local AnchorPoint = GetSetting("UIAnchorPoint")
-   -- local X = GetSetting("UIX")
-   -- local Y = GetSetting("UIY")
-   -- FireHack:SetPoint(AnchorPoint ~= "" and AnchorPoint or "CENTER", X ~= "" and tonumber(X) or -200, Y ~= "" and tonumber(Y) or 100)
-   guiFrame:SetPoint("CENTER", -200, 100) -- User Setting, anchor and offset
+   local AnchorPoint = settingsTable["UIAnchorPoint"] or "CENTER"
+   local X  = settingsTable["UIX"] and tonumber(settingsTable["UIX"]) or -200
+   local Y  = settingsTable["UIY"] and tonumber(settingsTable["UIY"]) or 100
+   guiFrame:SetPoint(AnchorPoint, X, Y)
    
-   -- FireHack:SetScript("OnShow", function () SetSetting("UIVisible", "true") end)
-   -- FireHack:SetScript("OnHide", function () SetSetting("UIVisible", "false") end)
-   -- if GetSetting("UIVisible") == "false" then
-   --    FireHack:Hide()
-   -- guiFrame:Hide()
-   -- end
+   guiFrame:SetScript("OnShow", function() settingsTable[playerFullName]["UIVisible"] = "true"; if not writeSettingsQueued then queueUpCO(writeSettingsToDisk); writeSettingsQueued = true end end)
+   guiFrame:SetScript("OnHide", function() settingsTable[playerFullName]["UIVisible"] = "false"; if not writeSettingsQueued then queueUpCO(writeSettingsToDisk); writeSettingsQueued = true end end)
+   if not settingsTable[playerFullName]["UIVisible"] or settingsTable[playerFullName]["UIVisible"] == "false" then guiFrame:Hide() end
 
    local TitleBar = CreateFrame("Frame", nil, guiFrame)
    TitleBar:SetPoint("TOPLEFT", 1, -1)
@@ -102,9 +132,10 @@ gFH.CO = coroutine.create(function()
       guiFrame:StopMovingOrSizing()
 
       local Point, RelativeTo, RelativePoint, X, Y = guiFrame:GetPoint()
-      -- SetSetting("UIAnchorPoint", Point)
-      -- SetSetting("UIX", X)
-      -- SetSetting("UIY", Y)
+      settingsTable["UIAnchorPoint"] = Point
+      settingsTable["UIX"] = X
+      settingsTable["UIY"] = Y
+      if not writeSettingsQueued then queueUpCO(writeSettingsToDisk); writeSettingsQueued = true end
    end
    )
    TitleBar:SetScript("OnMouseDown", function () guiFrame:StartMoving() end)
@@ -165,12 +196,21 @@ gFH.CO = coroutine.create(function()
    SLASH_TOGGLEGFHGUI1 = "/gfh"
    SlashCmdList["TOGGLEGFHGUI"] = toggleGUI
 
+   if not settingsTable["checkBoxSave"] then settingsTable["checkBoxSave"] = {} end
+   if not settingsTable[playerFullName]["checkBoxSave"] then settingsTable[playerFullName]["checkBoxSave"] = {} end
+
+
    AddSectionDivider("Talent Hack")
    local leftClickTalentHack, middleClickTalentHack, rightClickTalentHack
+   local talentHackCheckBoxes = {}
 
-   AddOption("LeftClick Choose", function(CheckBox) leftClickTalentHack = CheckBox:GetChecked() end) -- User Setting
-   AddOption("RightClick Clear", function(CheckBox) rightClickTalentHack = CheckBox:GetChecked() end) -- User Setting
-   AddOption("MiddleClick Clear All", function(CheckBox) middleClickTalentHack = CheckBox:GetChecked() end) -- User Setting
+   talentHackCheckBoxes["TALENTLEFTCLICK"]   = AddOption("LeftClick Choose",      function(CheckBox) leftClickTalentHack   = CheckBox:GetChecked(); settingsTable[playerFullName]["checkBoxSave"]["TALENTLEFTCLICK"]   = CheckBox:GetChecked(); if not writeSettingsQueued then queueUpCO(writeSettingsToDisk); writeSettingsQueued = true end end)
+   talentHackCheckBoxes["TALENTRIGHTCLICK"]  = AddOption("RightClick Clear",      function(CheckBox) rightClickTalentHack  = CheckBox:GetChecked(); settingsTable[playerFullName]["checkBoxSave"]["TALENTRIGHTCLICK"]  = CheckBox:GetChecked(); if not writeSettingsQueued then queueUpCO(writeSettingsToDisk); writeSettingsQueued = true end end)
+   talentHackCheckBoxes["TALENTMIDDLECLICK"] = AddOption("MiddleClick Clear All", function(CheckBox) middleClickTalentHack = CheckBox:GetChecked(); settingsTable[playerFullName]["checkBoxSave"]["TALENTMIDDLECLICK"] = CheckBox:GetChecked(); if not writeSettingsQueued then queueUpCO(writeSettingsToDisk); writeSettingsQueued = true end end)
+   
+   for i, v in pairs(talentHackCheckBoxes) do
+      if settingsTable[playerFullName]["checkBoxSave"][i] then v:Click("LeftButton", true) end
+   end
    
    local function setTalent(msg)
       msg = string.lower(msg)
@@ -290,27 +330,35 @@ gFH.CO = coroutine.create(function()
    end
    setTalentRemove(true)
 
+   
    AddSectionDivider("Render Hack")
    local playerRender, pPetsRender, ePlayersRender, ePetsRender, fPlayersRender, fPetsRender, eMobsRender, fMobsRender
-   local dummyFunc = function() end
-   
    local RenderingCheckboxes = {}
 
-   RenderingCheckboxes["Player"] = AddOption("Player", function(CheckBox) playerRender = CheckBox:GetChecked() end)
-   RenderingCheckboxes["PPets"] = AddOption("Player's Pets", function(CheckBox) pPetsRender = CheckBox:GetChecked() end)
-   RenderingCheckboxes["EPlayers"] = AddOption("Enemy Players", function(CheckBox) ePlayersRender = CheckBox:GetChecked() end)
-   RenderingCheckboxes["EPets"] = AddOption("Enemy Players' Pets", function(CheckBox) ePetsRender = CheckBox:GetChecked() end)
-   RenderingCheckboxes["FPlayers"] = AddOption("Friendly Players", function(CheckBox) fPlayersRender = CheckBox:GetChecked() end)
-   RenderingCheckboxes["FPets"] = AddOption("Friendly Players' Pets", function(CheckBox) fPetsRender = CheckBox:GetChecked() end)
-   RenderingCheckboxes["HMobs"] = AddOption("Enemy Mobs", function(CheckBox) eMobsRender = CheckBox:GetChecked() end)
-   RenderingCheckboxes["FMobs"] = AddOption("Friendly Mobs", function(CheckBox) fMobsRender = CheckBox:GetChecked() end)
+   RenderingCheckboxes["RENDERPLAYER"]   = AddOption("Player",                 function(CheckBox) playerRender   = CheckBox:GetChecked(); settingsTable[playerFullName]["checkBoxSave"]["RENDERPLAYER"]   = CheckBox:GetChecked(); if not writeSettingsQueued then queueUpCO(writeSettingsToDisk); writeSettingsQueued = true end end)
+   RenderingCheckboxes["RENDERPPETS"]    = AddOption("Player's Pets",          function(CheckBox) pPetsRender    = CheckBox:GetChecked(); settingsTable[playerFullName]["checkBoxSave"]["RENDERPPETS"]    = CheckBox:GetChecked(); if not writeSettingsQueued then queueUpCO(writeSettingsToDisk); writeSettingsQueued = true end end)
+   RenderingCheckboxes["RENDEREPLAYERS"] = AddOption("Enemy Players",          function(CheckBox) ePlayersRender = CheckBox:GetChecked(); settingsTable[playerFullName]["checkBoxSave"]["RENDEREPLAYERS"] = CheckBox:GetChecked(); if not writeSettingsQueued then queueUpCO(writeSettingsToDisk); writeSettingsQueued = true end end)
+   RenderingCheckboxes["RENDEREPETS"]    = AddOption("Enemy Players' Pets",    function(CheckBox) ePetsRender    = CheckBox:GetChecked(); settingsTable[playerFullName]["checkBoxSave"]["RENDEREPETS"]    = CheckBox:GetChecked(); if not writeSettingsQueued then queueUpCO(writeSettingsToDisk); writeSettingsQueued = true end end)
+   RenderingCheckboxes["RENDERFPLAYERS"] = AddOption("Friendly Players",       function(CheckBox) fPlayersRender = CheckBox:GetChecked(); settingsTable[playerFullName]["checkBoxSave"]["RENDERFPLAYERS"] = CheckBox:GetChecked(); if not writeSettingsQueued then queueUpCO(writeSettingsToDisk); writeSettingsQueued = true end end)
+   RenderingCheckboxes["RENDERFPETS"]    = AddOption("Friendly Players' Pets", function(CheckBox) fPetsRender    = CheckBox:GetChecked(); settingsTable[playerFullName]["checkBoxSave"]["RENDERFPETS"]    = CheckBox:GetChecked(); if not writeSettingsQueued then queueUpCO(writeSettingsToDisk); writeSettingsQueued = true end end)
+   RenderingCheckboxes["RENDERHMOBS"]    = AddOption("Enemy Mobs",             function(CheckBox) eMobsRender    = CheckBox:GetChecked(); settingsTable[playerFullName]["checkBoxSave"]["RENDERHMOBS"]    = CheckBox:GetChecked(); if not writeSettingsQueued then queueUpCO(writeSettingsToDisk); writeSettingsQueued = true end end)
+   RenderingCheckboxes["RENDERFMOBS"]    = AddOption("Friendly Mobs",          function(CheckBox) fMobsRender    = CheckBox:GetChecked(); settingsTable[playerFullName]["checkBoxSave"]["RENDERFMOBS"]    = CheckBox:GetChecked(); if not writeSettingsQueued then queueUpCO(writeSettingsToDisk); writeSettingsQueued = true end end)
 
-   for i, v in pairs(RenderingCheckboxes) do v:Click("LeftButton", true) end -- User Setting
+   for i, v in pairs(RenderingCheckboxes) do
+      if settingsTable[playerFullName]["checkBoxSave"][i] == nil or settingsTable[playerFullName]["checkBoxSave"][i] then v:Click("LeftButton", true) end
+      -- if settingsTable[playerFullName]["checkBoxSave"][i] then v:Click("LeftButton", true) end
+   end 
 
 
    AddSectionDivider("Automation")
    local tFelExplosives
-   AddOption("Target Fel Explosives", function(CheckBox) tFelExplosives = CheckBox:GetChecked() end)
+   local AutomationCheckboxes = {}
+   
+   AutomationCheckboxes["TFELEXPLOSIVES"] = AddOption("Target Fel Explosives", function(CheckBox) tFelExplosives = CheckBox:GetChecked(); settingsTable[playerFullName]["checkBoxSave"]["TFELEXPLOSIVES"] = CheckBox:GetChecked(); if not writeSettingsQueued then queueUpCO(writeSettingsToDisk); writeSettingsQueued = true end end)
+
+   for i, v in pairs(AutomationCheckboxes) do
+      if settingsTable[playerFullName]["checkBoxSave"][i] then v:Click("LeftButton", true) end
+   end
 
    local omFrame = CreateFrame("Frame")
    local omCO
